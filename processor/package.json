@@ -1,0 +1,13 @@
+{
+  "name": "store-revenue-processor",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=21" },
+  "scripts": { "start": "node --require ./src/otel.js src/kafka.js", "test": "node --test \"test/**/*.test.js\"" },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "0.50.0",
+    "@opentelemetry/sdk-node": "0.53.0",
+    "kafkajs": "2.2.4"
+  }
+}
