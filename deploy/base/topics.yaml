@@ -1,0 +1,57 @@
+# Strimzi-managed topics (the Kafka cluster itself is in deploy/platform/kafka.yaml).
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.v1
+  labels: { strimzi.io/cluster: commerce }
+spec:
+  partitions: 12 # keyed by storeId: per-store ordering
+  replicas: 3
+  config:
+    min.insync.replicas: "2"
+    retention.ms: "604800000" # 7 days: enough to replay after an incident
+    cleanup.policy: delete
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: store-revenue.v1
+  labels: { strimzi.io/cluster: commerce }
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    min.insync.replicas: "2"
+    retention.ms: "2592000000"
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: store-revenue.state.v1
+  labels: { strimzi.io/cluster: commerce }
+spec:
+  partitions: 12
+  replicas: 3
+  config:
+    cleanup.policy: compact # latest window-state checkpoint per input partition
+    min.insync.replicas: "2"
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.late.v1
+  labels: { strimzi.io/cluster: commerce }
+spec:
+  partitions: 3
+  replicas: 3
+  config: { min.insync.replicas: "2", retention.ms: "2592000000" }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.dlq.v1
+  labels: { strimzi.io/cluster: commerce }
+spec:
+  partitions: 3
+  replicas: 3
+  config: { min.insync.replicas: "2", retention.ms: "1209600000" }
