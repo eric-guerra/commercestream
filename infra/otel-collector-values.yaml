@@ -1,0 +1,22 @@
+mode: deployment
+replicaCount: 2
+config:
+  receivers:
+    otlp:
+      protocols:
+        http: { endpoint: "0.0.0.0:4318" }
+        grpc: { endpoint: "0.0.0.0:4317" }
+  processors:
+    memory_limiter: { check_interval: 1s, limit_percentage: 80, spike_limit_percentage: 20 }
+    batch: {}
+    k8sattributes: {}
+  exporters:
+    otlphttp/traces: { endpoint: "http://tempo.observability:4318" }
+    prometheusremotewrite: { endpoint: "http://mimir.observability/api/v1/push" }
+  service:
+    pipelines:
+      traces: { receivers: [otlp], processors: [memory_limiter, k8sattributes, batch], exporters: [otlphttp/traces] }
+      metrics: { receivers: [otlp], processors: [memory_limiter, k8sattributes, batch], exporters: [prometheusremotewrite] }
+resources:
+  requests: { cpu: 200m, memory: 512Mi }
+  limits: { memory: 1Gi }
