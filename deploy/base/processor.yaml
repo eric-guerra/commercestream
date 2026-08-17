@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store-revenue
+  labels: { app.kubernetes.io/name: store-revenue, app.kubernetes.io/part-of: commercestream }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels: { app.kubernetes.io/name: store-revenue }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: store-revenue, app.kubernetes.io/part-of: commercestream }
+    spec:
+      serviceAccountName: store-revenue
+      terminationGracePeriodSeconds: 45 # finish the in-flight transaction before the consumer leaves the group
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: store-revenue }
+      containers:
+        - name: processor
+          image: ghcr.io/ericguerra/store-revenue:1.0.0
+          env:
+            - { name: KAFKA_BROKERS, value: "commerce-kafka-bootstrap.kafka:9092" }
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.observability:4318" }
+            - { name: OTEL_SERVICE_NAME, value: store-revenue }
+            - name: HOSTNAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } } # unique transactional.id per pod
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          livenessProbe:
+            exec: { command: ["node", "-e", "process.exit(0)"] }
+            periodSeconds: 30
+          readinessProbe:
+            exec: { command: ["node", "-e", "process.exit(0)"] }
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: store-revenue
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: store-revenue
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: store-revenue }
+---
+# Scale on consumer lag, not CPU: lag is what customers feel (stale dashboards).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: store-revenue
+spec:
+  scaleTargetRef: { name: store-revenue }
+  minReplicaCount: 2
+  maxReplicaCount: 12 # = partitions of orders.v1; more consumers than partitions would idle
+  cooldownPeriod: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: commerce-kafka-bootstrap.kafka:9092
+        consumerGroup: store-revenue
+        topic: orders.v1
+        lagThreshold: "2000"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-revenue
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: store-revenue }
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kafka } } }]
+      ports: [{ port: 9092, protocol: TCP }]
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: observability } } }]
+      ports: [{ port: 4318, protocol: TCP }]
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ port: 53, protocol: UDP }]

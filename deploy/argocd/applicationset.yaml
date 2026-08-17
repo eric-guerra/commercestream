@@ -1,0 +1,38 @@
+# GitOps: one ApplicationSet renders an Argo CD Application per environment overlay.
+# Staging auto-syncs on every merge; prod syncs automatically but only from the release branch,
+# and waits on the platform wave (Kafka, topics) before apps.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: commercestream
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          - { env: staging, revision: main, cluster: https://kubernetes.default.svc }
+          - { env: prod, revision: release, cluster: https://prod-eks.example.internal }
+  template:
+    metadata:
+      name: "commercestream-{{.env}}"
+      labels: { env: "{{.env}}" }
+    spec:
+      project: commerce
+      source:
+        repoURL: https://github.com/ericguerra/commercestream.git
+        targetRevision: "{{.revision}}"
+        path: "deploy/overlays/{{.env}}"
+      destination:
+        server: "{{.cluster}}"
+        namespace: commerce
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: [CreateNamespace=true, ServerSideApply=true]
+        retry:
+          limit: 5
+          backoff: { duration: 30s, factor: 2, maxDuration: 10m }
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers: [/spec/replicas] # KEDA owns replicas
